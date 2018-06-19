@@ -25,7 +25,8 @@ SoftwareSerial EspSerial(2, 3); // RX, TX
 #define ESP8266_BAUD 19200
 
 // Moisture sensors
-#define MoistureSamples			3		// the number of samples used for each reading
+#define NUM_SENSORS				4		// the number of sensors attached
+#define NUM_SAMPLES			3		// the number of samples used for each reading
 #define MSensor0				A0		// the Arduino pin to which this sensor's analog output is connected
 #define MSensor0Virtual			1		// the Blynk Virtual pin to which this sensor is connected
 #define MSensor0Alarm			8		// the Arduino pin to which this sensor's digital alarm is connected
@@ -133,10 +134,10 @@ void readSoilMoisture() {
 	//digitalWrite(SensorsPwr, HIGH);
 	//delay(1000);
 
-	alarm[0] = digitalRead(MSensor0_Alarm);
-	alarm[1] = digitalRead(MSensor1_Alarm);
-	alarm[2] = digitalRead(MSensor2_Alarm);
-	alarm[3] = digitalRead(MSensor3_Alarm);
+	alarm[0] = digitalRead(MSensor0Alarm);
+	alarm[1] = digitalRead(MSensor1Alarm);
+	alarm[2] = digitalRead(MSensor2Alarm);
+	alarm[3] = digitalRead(MSensor3Alarm);
 
 	for (int i = 0; i < NUM_SAMPLES; i++) {
 		delay(10);
@@ -300,5 +301,5 @@ BLYNK_READ(Sensor3ThresholdVirtual) {
 }
 
 BLYNK_CONNECTED() {
-	Blynk.syncAll;
+	Blynk.syncAll();
 }
