@@ -29,27 +29,27 @@ SoftwareSerial EspSerial(2, 3); // RX, TX
 #define NUM_SAMPLES				3		// the number of samples used for each reading
 #define MSensor0				A0		// the Arduino pin to which this sensor's analog output is connected
 #define MSensor0Virtual			1		// the Blynk Virtual pin to which this sensor is connected
-#define MSensor0Alarm			8		// the Arduino pin to which this sensor's digital alarm is connected
+#define MSensor0Alarm			4		// the Arduino pin to which this sensor's digital alarm is connected
 #define MSensor0AlarmVirtual	16		// the BlynkVirtual pin to which this sensor's digital alarm is connected
 #define MSensor1				A1		// the Arduino pin to which this sensor's analog output is connected
 #define MSensor1Virtual			2		// the Blynk Virtual pin to which this sensor is connected
-#define MSensor1Alarm			9		// the Arduino pin to which this sensor's digital alarm is connected
+#define MSensor1Alarm			5		// the Arduino pin to which this sensor's digital alarm is connected
 #define MSensor1AlarmVirtual	17		// the BlynkVirtual pin to which this sensor's digital alarm is connected
 #define MSensor2				A2		// the Arduino pin to which this sensor's analog output is connected
 #define MSensor2Virtual			3		// the Blynk Virtual pin to which this sensor is connected
-#define MSensor2Alarm			10		// the Arduino pin to which this sensor's digital alarm is connected
+#define MSensor2Alarm			6		// the Arduino pin to which this sensor's digital alarm is connected
 #define MSensor2AlarmVirtual	18		// the BlynkVirtual pin to which this sensor's digital alarm is connected
 #define MSensor3				A3		// the Arduino pin to which this sensor's analog output is connected
 #define MSensor3Virtual			4		// the Blynk Virtual pin to which this sensor is connected
-#define MSensor3Alarm			11		// the Arduino pin to which this sensor's digital alarm is connected
+#define MSensor3Alarm			7		// the Arduino pin to which this sensor's digital alarm is connected
 #define MSensor3AlarmVirtual	19		// the BlynkVirtual pin to which this sensor's digital alarm is connected
 
-#define PumpRelay				12		// the Arduino output pin to which the pump relay is connected
+#define PumpRelay				8		// the Arduino output pin to which the pump relay is connected
 #define PumpRelayVirtual		5		// the Blynk Virtual pin to which the pump relay is connected
 
-#define WaterLevelEmpty			13		// the Arduino input pin to which the empty water sensor is connected
-#define WaterLevelHalf			14		// the Arduino input pin to which the half water sensor is connected
-#define WaterLevelFull			15		// the Arduino input pin to which the full water sensor is connected
+#define WaterLevelEmpty			11		// the Arduino input pin to which the empty water sensor is connected
+#define WaterLevelHalf			12		// the Arduino input pin to which the half water sensor is connected
+#define WaterLevelFull			13		// the Arduino input pin to which the full water sensor is connected
 byte WaterLevel;
 #define WaterLevelVirtual		6		// the Arduino input pin to which the full water sensor is connected
 
@@ -57,24 +57,21 @@ byte WaterLevel;
 #define Sensor1ThresholdVirtual 21		// virtual pin 0 asigned to change sleep period
 #define Sensor2ThresholdVirtual 22		// virtual pin 0 asigned to change sleep period
 #define Sensor3ThresholdVirtual 23		// virtual pin 0 asigned to change sleep period
-#define DEFAULTSENSORTHRESHOLD	124		// the default moisture threshold value
-#define DEFAULTSENSORVERYDRY	1		// the default moisture "very dry" threshold value
+#define DEFAULTSENSORTHRESHOLD	1024	// the default moisture threshold value
+#define DEFAULTSENSORVERYDRY	1024	// the default moisture "very dry" threshold value
 
-byte Sensor0Threshold = DEFAULTSENSORTHRESHOLD;		// the default moisture threshold for this sensor
-byte Sensor1Threshold = DEFAULTSENSORTHRESHOLD;		// the default moisture threshold for this sensor
-byte Sensor2Threshold = DEFAULTSENSORTHRESHOLD;		// the default moisture threshold for this sensor
-byte Sensor3Threshold = DEFAULTSENSORTHRESHOLD;		// the default moisture threshold for this sensor
+uint16_t Sensor0Threshold = DEFAULTSENSORTHRESHOLD;		// the default moisture threshold for this sensor
+uint16_t Sensor1Threshold = DEFAULTSENSORTHRESHOLD;		// the default moisture threshold for this sensor
+uint16_t Sensor2Threshold = DEFAULTSENSORTHRESHOLD;		// the default moisture threshold for this sensor
+uint16_t Sensor3Threshold = DEFAULTSENSORTHRESHOLD;		// the default moisture threshold for this sensor
 
-byte Sensor0VeryDry = DEFAULTSENSORVERYDRY;		// the default moisture "very dry" threshold for this sensor
-byte Sensor1VeryDry = DEFAULTSENSORVERYDRY;		// the default moisture "very dry" for this sensor
-byte Sensor2VeryDry = DEFAULTSENSORVERYDRY;		// the default moisture "very dry" for this sensor
-byte Sensor3VeryDry = DEFAULTSENSORVERYDRY;		// the default moisture "very dry" for this sensor
+uint16_t SensorVeryDry = DEFAULTSENSORVERYDRY;		// the default moisture "very dry" threshold for all sensors
 
 #define DEFAULT_WATERING_MAX_INTERVAL		300000L		// 5 minutes
 long WATERING_MAX_INTERVAL = DEFAULT_WATERING_MAX_INTERVAL;
 #define SetMaxWaterIntervalVirtual	26
 
-#define MAIN_WATERLEVELMONITOR_INTERVAL		120000L		// 2 minute while not watering
+#define MAIN_WATERLEVELMONITOR_INTERVAL		120000L		// 2 mins while not watering
 #define WATERING_WATERLEVELMONITOR_INTERVAL	5000L		// 5 secs while watering
 #define MAIN_MOISTUREMONITOR_INTERVAL		60000L		// 1 minute while not watering
 #define WATERING_MOISTUREMONITOR_INTERVAL	15000L		// 15 secs while not watering
@@ -85,6 +82,9 @@ bool WaterPumpIsON;						//current status of the water pump
 uint16_t WaterPumpOnCounter;
 uint16_t WaterPumpOffCounter;
 #define ResetCountersVirtual	25		//virtual pin to reset the pump ON/OFF counters
+
+#define RedLED					9		// the Arduino ouput pin to which the RED LED is connected
+#define GreenLED				10		// the Arduino ouput pin to which the GREEN LED is connected
 
 
 BlynkTimer timer;
@@ -120,6 +120,10 @@ void setup()
 	WaterPumpOnCounter = 0;
 
 	CheckWaterLevel();		// initialize the waterLevel variable
+
+	pinMode(RedLED, OUTPUT);
+	pinMode(GreenLED, OUTPUT);
+
 
 	// Debug console
 	Serial.begin(115200);
@@ -200,21 +204,21 @@ void readSoilMoisture() {
 	byte PlantsNeedingWater = 0;
 	byte PlantsVeryDry = 0;
 
-	if (moisture_average[0] < Sensor0Threshold)
+	if (moisture_average[0] > Sensor0Threshold)
 		PlantsNeedingWater++;
-	if (moisture_average[0] < Sensor0VeryDry)
+	if (moisture_average[0] > SensorVeryDry)
 		PlantsVeryDry++;
-	if (moisture_average[1] < Sensor1Threshold)
+	if (moisture_average[1] > Sensor1Threshold)
 		PlantsNeedingWater++;
-	if (moisture_average[1] < Sensor1VeryDry)
+	if (moisture_average[1] > SensorVeryDry)
 		PlantsVeryDry++;
-	if (moisture_average[2] < Sensor2Threshold)
+	if (moisture_average[2] > Sensor2Threshold)
 		PlantsNeedingWater++;
-	if (moisture_average[2] < Sensor2VeryDry)
+	if (moisture_average[2] > SensorVeryDry)
 		PlantsVeryDry++;
-	if (moisture_average[3] < Sensor3Threshold)
+	if (moisture_average[3] > Sensor3Threshold)
 		PlantsNeedingWater++;
-	if (moisture_average[3] < Sensor3VeryDry)
+	if (moisture_average[3] > SensorVeryDry)
 		PlantsVeryDry++;
 
 
@@ -233,7 +237,7 @@ void readSoilMoisture() {
 
 void StartWatering() {
 	if (digitalRead(WaterLevelEmpty>0)) {
-		//digitalWrite(PumpRelay, HIGH);
+		digitalWrite(PumpRelay, HIGH);
 		WaterPumpIsON = true;
 		WaterPumpOnCounter++;
 	#if DEBUG >= 1
@@ -252,21 +256,22 @@ void StartWatering() {
 }
 
 void CheckWaterLevel() {
-	if (digitalRead(WaterLevelEmpty) == 0) {
+	if (digitalRead(WaterLevelEmpty)) {
 		WaterLevel = 0;
 		if (WaterPumpIsON == true)
 			StopWatering();
 	}
-	else if (digitalRead(WaterLevelHalf) == 0)
+	else if (digitalRead(WaterLevelHalf))
 		WaterLevel = 1;
-	else if (digitalRead(WaterLevelFull) == 0)
+	else if (digitalRead(WaterLevelFull))
 		WaterLevel = 2;
 	else
 		WaterLevel = 3;
+	Blynk.virtualWrite(WaterLevelVirtual, WaterLevel);
 }
 
 void StopWatering() {
-	//digitalWrite(PumpRelay, LOW);
+	digitalWrite(PumpRelay, LOW);
 	WaterPumpIsON = false;
 	WaterPumpOffCounter++;
 #if DEBUG >= 1
@@ -368,7 +373,7 @@ BLYNK_READ(WaterPumpStatusVirtual) {
 }
 
 BLYNK_WRITE(SetMaxWaterIntervalVirtual) {
-	WATERING_MAX_INTERVAL = param.asLong();
+	WATERING_MAX_INTERVAL = param.asLong()*1000L;
 #if DEBUG >=1
 	Serial.print("Blynk setting Watering Max Interval = ");
 	Serial.println(WATERING_MAX_INTERVAL);
