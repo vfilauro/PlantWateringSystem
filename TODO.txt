@@ -1,0 +1,2 @@
+Move BlynkWrites away from soiluteMoisture function. Make these either periodic update from HW (through timer) or as BLYNK_READS (PULL from app)
+Add watchdog timer (see timer arduino)

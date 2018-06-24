@@ -26,7 +26,7 @@ SoftwareSerial EspSerial(2, 3); // RX, TX
 
 // Moisture sensors
 #define NUM_SENSORS				4		// the number of sensors attached
-#define NUM_SAMPLES			3		// the number of samples used for each reading
+#define NUM_SAMPLES				3		// the number of samples used for each reading
 #define MSensor0				A0		// the Arduino pin to which this sensor's analog output is connected
 #define MSensor0Virtual			1		// the Blynk Virtual pin to which this sensor is connected
 #define MSensor0Alarm			8		// the Arduino pin to which this sensor's digital alarm is connected
@@ -50,6 +50,7 @@ SoftwareSerial EspSerial(2, 3); // RX, TX
 #define WaterLevelEmpty			13		// the Arduino input pin to which the empty water sensor is connected
 #define WaterLevelHalf			14		// the Arduino input pin to which the half water sensor is connected
 #define WaterLevelFull			15		// the Arduino input pin to which the full water sensor is connected
+byte WaterLevel;
 #define WaterLevelVirtual		6		// the Arduino input pin to which the full water sensor is connected
 
 #define Sensor0ThresholdVirtual 20		// virtual pin 0 asigned to change sleep period
@@ -69,16 +70,28 @@ byte Sensor1VeryDry = DEFAULTSENSORVERYDRY;		// the default moisture "very dry" 
 byte Sensor2VeryDry = DEFAULTSENSORVERYDRY;		// the default moisture "very dry" for this sensor
 byte Sensor3VeryDry = DEFAULTSENSORVERYDRY;		// the default moisture "very dry" for this sensor
 
-#define WATERING_INTERVAL			300000L		// 5 minutes
-#define WATERLEVELMONITOR_INTERVAL	15000L		// 15 secs
-#define MOISTUREMONITOR_INTERVAL	60000L		// 1 minute
+#define DEFAULT_WATERING_MAX_INTERVAL		300000L		// 5 minutes
+long WATERING_MAX_INTERVAL = DEFAULT_WATERING_MAX_INTERVAL;
+#define SetMaxWaterIntervalVirtual	26
 
-bool WaterPumpIsON;
+#define MAIN_WATERLEVELMONITOR_INTERVAL		120000L		// 2 minute while not watering
+#define WATERING_WATERLEVELMONITOR_INTERVAL	5000L		// 5 secs while watering
+#define MAIN_MOISTUREMONITOR_INTERVAL		60000L		// 1 minute while not watering
+#define WATERING_MOISTUREMONITOR_INTERVAL	15000L		// 15 secs while not watering
+
+bool WaterPumpIsON;						//current status of the water pump
+#define WaterPumpStatusVirtual	24		//virtual pin to read the current status of the water pump
+
 uint16_t WaterPumpOnCounter;
 uint16_t WaterPumpOffCounter;
+#define ResetCountersVirtual	25		//virtual pin to reset the pump ON/OFF counters
 
 
 BlynkTimer timer;
+int mainSoilMoistureTimer;						// ID for the main timer to monitor soil mositure (used when not watering). 
+int wateringSoilMoistureTimer;					// ID for the main timer to monitor soil mositure (used when watering).
+int mainWaterLevelTimer;						// ID for the main timer to monitor water level (used when not watering).
+int wateringWaterLevelTimer;					// ID for the main timer to monitor water level (used when watering).
 
 ESP8266 wifi(&EspSerial);
 
@@ -100,10 +113,17 @@ void setup()
 	pinMode(WaterLevelFull, INPUT);
 
 	
+	//make sure pump is off
+	StopWatering();
+	WaterPumpIsON = false;		//redundant (already done in StopWatering);
+	WaterPumpOffCounter = 0;
+	WaterPumpOnCounter = 0;
+
+	CheckWaterLevel();		// initialize the waterLevel variable
+
 	// Debug console
 	Serial.begin(115200);
-
-
+	
 	// Set ESP8266 baud rate
 	EspSerial.begin(ESP8266_BAUD);
 	delay(10);
@@ -113,15 +133,19 @@ void setup()
 	//Blynk.begin(auth, wifi, ssid, pass, "blynk-cloud.com", 8442);
 	//Blynk.begin(auth, wifi, ssid, pass, IPAddress(192,168,1,100), 8442);
 
-	timer.setInterval(1000L, readSoilMoisture);
+	mainSoilMoistureTimer = timer.setInterval(MAIN_MOISTUREMONITOR_INTERVAL, readSoilMoisture);				// set timer to continuously monitor the moisture level (when not watering)
+	wateringSoilMoistureTimer = timer.setInterval(WATERING_MOISTUREMONITOR_INTERVAL, readSoilMoisture);		// set timer to continuously monitor the moisture level (when watering)
+	timer.disable(wateringSoilMoistureTimer);
 
+	mainWaterLevelTimer = timer.setInterval(MAIN_WATERLEVELMONITOR_INTERVAL, CheckWaterLevel);				// set timer to continuously monitor the water level (when not watering)
+	wateringWaterLevelTimer = timer.setInterval(WATERING_WATERLEVELMONITOR_INTERVAL, CheckWaterLevel);		// set timer to continuously monitor the water level (when watering)
+	timer.disable(wateringWaterLevelTimer);
 }
 
 void loop()
 {
 	Blynk.run();
 	timer.run();
-
 }
 
 
@@ -200,7 +224,7 @@ void readSoilMoisture() {
 			StartWatering();
 	}
 	else if (PlantsNeedingWater == 0 ) {
-		// Stop pump
+		// Stop pump if moisture level is good for all plants
 		if (WaterPumpIsON == true)
 			StopWatering();
 	}
@@ -208,18 +232,26 @@ void readSoilMoisture() {
 }
 
 void StartWatering() {
-	if (digitalRead(WaterLevelEmpty)) {
+	if (digitalRead(WaterLevelEmpty>0)) {
 		//digitalWrite(PumpRelay, HIGH);
 		WaterPumpIsON = true;
 		WaterPumpOnCounter++;
-		timer.setInterval(WATERING_INTERVAL, StopWatering);					// set timer to stop the pump
-		timer.setInterval(WATERLEVELMONITOR_INTERVAL, CheckWaterLevel);		// set timer to continuously monitor the water level
-		timer.setInterval(MOISTUREMONITOR_INTERVAL, readSoilMoisture);		// set timer to continuously monitor the moisture level
+	#if DEBUG >= 1
+		BLYNK_ASSERT(timer.isEnabled(mainSoilMoistureTimer) == false);
+		BLYNK_ASSERT(timer.isEnabled(wateringSoilMoistureTimer) == true);
+		BLYNK_ASSERT(timer.isEnabled(mainWaterLevelTimer) == false);
+		BLYNK_ASSERT(timer.isEnabled(wateringWaterLevelTimer) == true);
+#endif
+		timer.disable(mainSoilMoistureTimer);
+		timer.enable(wateringSoilMoistureTimer);
+		timer.disable(mainWaterLevelTimer);
+		timer.enable(wateringWaterLevelTimer);
+		timer.setTimeout(WATERING_MAX_INTERVAL, StopWatering);				// set timer to stop the pump when the MAX_INTERVAL value is passed
 	}
+
 }
 
 void CheckWaterLevel() {
-	byte WaterLevel;
 	if (digitalRead(WaterLevelEmpty) == 0) {
 		WaterLevel = 0;
 		if (WaterPumpIsON == true)
@@ -237,7 +269,17 @@ void StopWatering() {
 	//digitalWrite(PumpRelay, LOW);
 	WaterPumpIsON = false;
 	WaterPumpOffCounter++;
+#if DEBUG >= 1
+	BLYNK_ASSERT(timer.isEnabled(mainSoilMoistureTimer) == true);
+	BLYNK_ASSERT(timer.isEnabled(wateringSoilMoistureTimer) == false);
+	BLYNK_ASSERT(timer.isEnabled(mainWaterLevelTimer) == true);
+	BLYNK_ASSERT(timer.isEnabled(wateringWaterLevelTimer) == false);
 
+#endif
+	timer.disable(wateringSoilMoistureTimer);
+	timer.enable(mainSoilMoistureTimer);
+	timer.disable(wateringWaterLevelTimer);
+	timer.enable(mainWaterLevelTimer);
 }
 
 BLYNK_WRITE(Sensor0ThresholdVirtual) {
@@ -297,6 +339,39 @@ BLYNK_READ(Sensor3ThresholdVirtual) {
 #if DEBUG >=1
 	Serial.print("Blynk reading Sensor3Threshold = ");
 	Serial.println(Sensor3Threshold);
+#endif
+}
+
+
+BLYNK_READ(WaterLevelVirtual) {
+	Blynk.virtualWrite(WaterLevelVirtual, WaterLevel);
+#if DEBUG >=1
+	Serial.print("Blynk reading WaterLevel = ");
+	Serial.println(WaterLevel);
+#endif
+}
+
+BLYNK_WRITE(ResetCountersVirtual) {
+	WaterPumpOffCounter = WaterPumpOnCounter = 0;
+#if DEBUG >=1
+	Serial.print("Blynk resetting counters - param = ");
+	Serial.println(param.asInt());
+#endif
+}
+
+BLYNK_READ(WaterPumpStatusVirtual) {
+	Blynk.virtualWrite(WaterPumpStatusVirtual, WaterPumpIsON?1:0);
+#if DEBUG >=1
+	Serial.print("Blynk reading WaterPumpStatus = ");
+	Serial.println(Sensor3Threshold);
+#endif
+}
+
+BLYNK_WRITE(SetMaxWaterIntervalVirtual) {
+	WATERING_MAX_INTERVAL = param.asLong();
+#if DEBUG >=1
+	Serial.print("Blynk setting Watering Max Interval = ");
+	Serial.println(WATERING_MAX_INTERVAL);
 #endif
 }
 
