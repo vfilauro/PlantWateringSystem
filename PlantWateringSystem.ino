@@ -5,6 +5,7 @@
 #include <ESP8266_Lib.h>
 #include <BlynkSimpleShieldEsp8266.h>
 
+
 // You should get Auth Token in the Blynk App.
 // Go to the Project Settings (nut icon).
 char auth[] = "6737339ce6434ad6b64b6858c6366739";
@@ -85,7 +86,6 @@ uint16_t WaterPumpOffCounter;
 
 #define RedLED					9		// the Arduino ouput pin to which the RED LED is connected
 #define GreenLED				10		// the Arduino ouput pin to which the GREEN LED is connected
-
 
 BlynkTimer timer;
 int mainSoilMoistureTimer;						// ID for the main timer to monitor soil mositure (used when not watering). 
@@ -240,6 +240,7 @@ void StartWatering() {
 		digitalWrite(PumpRelay, HIGH);
 		WaterPumpIsON = true;
 		WaterPumpOnCounter++;
+		Blynk.virtualWrite(PumpRelayVirtual, 255);
 	#if DEBUG >= 1
 		BLYNK_ASSERT(timer.isEnabled(mainSoilMoistureTimer) == false);
 		BLYNK_ASSERT(timer.isEnabled(wateringSoilMoistureTimer) == true);
@@ -274,6 +275,8 @@ void StopWatering() {
 	digitalWrite(PumpRelay, LOW);
 	WaterPumpIsON = false;
 	WaterPumpOffCounter++;
+	Blynk.virtualWrite(PumpRelayVirtual, 0);
+
 #if DEBUG >= 1
 	BLYNK_ASSERT(timer.isEnabled(mainSoilMoistureTimer) == true);
 	BLYNK_ASSERT(timer.isEnabled(wateringSoilMoistureTimer) == false);
@@ -379,6 +382,17 @@ BLYNK_WRITE(SetMaxWaterIntervalVirtual) {
 	Serial.println(WATERING_MAX_INTERVAL);
 #endif
 }
+
+BLYNK_WRITE(PumpRelayVirtual) {
+	if (WaterPumpIsON)
+		StopWatering();
+	else
+		StartWatering();
+
+	Serial.print("Blynk toggling water Pump relay = ");
+	Serial.println(param.asInt());
+}
+
 
 BLYNK_CONNECTED() {
 	Blynk.syncAll();
