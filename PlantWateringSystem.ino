@@ -4,7 +4,8 @@
 
 #include <ESP8266_Lib.h>
 #include <BlynkSimpleShieldEsp8266.h>
-
+#include <JLed.h>
+#include <avr/wdt.h>
 
 // You should get Auth Token in the Blynk App.
 // Go to the Project Settings (nut icon).
@@ -54,10 +55,12 @@ SoftwareSerial EspSerial(2, 3); // RX, TX
 byte WaterLevel;
 #define WaterLevelVirtual		6		// the Arduino input pin to which the full water sensor is connected
 
-#define Sensor0ThresholdVirtual 20		// virtual pin 0 asigned to change sleep period
-#define Sensor1ThresholdVirtual 21		// virtual pin 0 asigned to change sleep period
-#define Sensor2ThresholdVirtual 22		// virtual pin 0 asigned to change sleep period
-#define Sensor3ThresholdVirtual 23		// virtual pin 0 asigned to change sleep period
+#define Sensor0ThresholdVirtual 20		// virtual pin to change threshold for this sensor
+#define Sensor1ThresholdVirtual 21		// virtual pin to change threshold for this sensor
+#define Sensor2ThresholdVirtual 22		// virtual pin to change threshold for this sensor
+#define Sensor3ThresholdVirtual 23		// virtual pin to change threshold for this sensor
+#define SensorVeryDryVirtual	24		// virtual pin to change VERY_DRY threshold for ALL sensor
+
 #define DEFAULTSENSORTHRESHOLD	1024	// the default moisture threshold value
 #define DEFAULTSENSORVERYDRY	1024	// the default moisture "very dry" threshold value
 
@@ -65,7 +68,6 @@ uint16_t Sensor0Threshold = DEFAULTSENSORTHRESHOLD;		// the default moisture thr
 uint16_t Sensor1Threshold = DEFAULTSENSORTHRESHOLD;		// the default moisture threshold for this sensor
 uint16_t Sensor2Threshold = DEFAULTSENSORTHRESHOLD;		// the default moisture threshold for this sensor
 uint16_t Sensor3Threshold = DEFAULTSENSORTHRESHOLD;		// the default moisture threshold for this sensor
-
 uint16_t SensorVeryDry = DEFAULTSENSORVERYDRY;		// the default moisture "very dry" threshold for all sensors
 
 #define DEFAULT_WATERING_MAX_INTERVAL		300000L		// 5 minutes
@@ -73,27 +75,36 @@ long WATERING_MAX_INTERVAL = DEFAULT_WATERING_MAX_INTERVAL;
 #define SetMaxWaterIntervalVirtual	26
 
 #define MAIN_WATERLEVELMONITOR_INTERVAL		120000L		// 2 mins while not watering
-#define WATERING_WATERLEVELMONITOR_INTERVAL	5000L		// 5 secs while watering
+#define WATERING_WATERLEVELMONITOR_INTERVAL	3000L		// 3 secs while watering
 #define MAIN_MOISTUREMONITOR_INTERVAL		60000L		// 1 minute while not watering
-#define WATERING_MOISTUREMONITOR_INTERVAL	15000L		// 15 secs while not watering
+#define WATERING_MOISTUREMONITOR_INTERVAL	15000L		// 15 secs while watering
+#define HEARTBEAT_INTERVAL					60000L		// 1 min timer
 
 bool WaterPumpIsON;						//current status of the water pump
-#define WaterPumpStatusVirtual	24		//virtual pin to read the current status of the water pump
 
 uint16_t WaterPumpOnCounter;
 uint16_t WaterPumpOffCounter;
-#define ResetCountersVirtual	25		//virtual pin to reset the pump ON/OFF counters
+#define ResetCountersVirtual		25		//virtual pin to reset the pump ON/OFF counters
+#define WaterPumpOnCounterVirtual	27		//virtual pin to read counter of how many time the water pump was turned on
+#define WaterPumpOffCounterVirtual	28		//virtual pin to read counter of how many time the water pump was turned off
 
 #define RedLED					9		// the Arduino ouput pin to which the RED LED is connected
 #define GreenLED				10		// the Arduino ouput pin to which the GREEN LED is connected
+
+JLed RedLed = JLed(RedLED);
+JLed GreenLed = JLed(GreenLED);
+
 
 BlynkTimer timer;
 int mainSoilMoistureTimer;						// ID for the main timer to monitor soil mositure (used when not watering). 
 int wateringSoilMoistureTimer;					// ID for the main timer to monitor soil mositure (used when watering).
 int mainWaterLevelTimer;						// ID for the main timer to monitor water level (used when not watering).
 int wateringWaterLevelTimer;					// ID for the main timer to monitor water level (used when watering).
+int heartbeatTimer;								// ID for the heartbeat timer (printing counter to console)
 
 ESP8266 wifi(&EspSerial);
+
+uint16_t heartbeatCounter;
 
 void setup()
 {
@@ -121,21 +132,33 @@ void setup()
 
 	CheckWaterLevel();		// initialize the waterLevel variable
 
-	pinMode(RedLED, OUTPUT);
-	pinMode(GreenLED, OUTPUT);
-
+	//pinMode(RedLED, OUTPUT);
+	//pinMode(GreenLED, OUTPUT);
 
 	// Debug console
 	Serial.begin(115200);
 	
 	// Set ESP8266 baud rate
 	EspSerial.begin(ESP8266_BAUD);
-	delay(10);
+	
+	leds_connecting();
 
-	Blynk.begin(auth, wifi, ssid, pass);
-	// You can also specify server:
-	//Blynk.begin(auth, wifi, ssid, pass, "blynk-cloud.com", 8442);
-	//Blynk.begin(auth, wifi, ssid, pass, IPAddress(192,168,1,100), 8442);
+	//Blynk.begin(auth, wifi, ssid, pass);
+	do {
+		delay(1000);
+		BLYNK_LOG("Connecting to WiFi.\n");
+		Blynk.connectWiFi(ssid, pass);
+		BLYNK_LOG("Connected to WiFi. Now Configuring Blynk client.\n");
+		Blynk.config(wifi, auth);
+		BLYNK_LOG("Connecting to Blynk server.\n");
+		if (!Blynk.connect())
+			BLYNK_LOG("Failed to connect to Blynk server. Retrying...\n");
+	} while (Blynk.connected() == false);
+	BLYNK_LOG("Connected successfully to Blynk server.\n");
+
+	heartbeatCounter = 0;
+	heartbeatTimer = timer.setInterval(HEARTBEAT_INTERVAL, heartbeatCallback);								// set heartbeat timer to periodically print out  heartbeat counter to console
+	leds_connected();
 
 	mainSoilMoistureTimer = timer.setInterval(MAIN_MOISTUREMONITOR_INTERVAL, readSoilMoisture);				// set timer to continuously monitor the moisture level (when not watering)
 	wateringSoilMoistureTimer = timer.setInterval(WATERING_MOISTUREMONITOR_INTERVAL, readSoilMoisture);		// set timer to continuously monitor the moisture level (when watering)
@@ -144,12 +167,18 @@ void setup()
 	mainWaterLevelTimer = timer.setInterval(MAIN_WATERLEVELMONITOR_INTERVAL, CheckWaterLevel);				// set timer to continuously monitor the water level (when not watering)
 	wateringWaterLevelTimer = timer.setInterval(WATERING_WATERLEVELMONITOR_INTERVAL, CheckWaterLevel);		// set timer to continuously monitor the water level (when watering)
 	timer.disable(wateringWaterLevelTimer);
+
+	wdt_enable(WDTO_8S);
+
 }
 
 void loop()
 {
 	Blynk.run();
 	timer.run();
+	GreenLed.Update();
+	RedLed.Update();
+	wdt_reset();
 }
 
 
@@ -224,6 +253,7 @@ void readSoilMoisture() {
 
 	if (PlantsNeedingWater >= 3 || PlantsVeryDry > 0) {
 		// Start pump
+		BLYNK_LOG("Plants need water\n");
 		if (WaterPumpIsON == false)
 			StartWatering();
 	}
@@ -237,16 +267,14 @@ void readSoilMoisture() {
 
 void StartWatering() {
 	if (digitalRead(WaterLevelEmpty>0)) {
+		BLYNK_LOG("starting watering\n");
 		digitalWrite(PumpRelay, HIGH);
 		WaterPumpIsON = true;
 		WaterPumpOnCounter++;
+		BLYNK_LOG("--> WaterPumpOnCounter = %d\n", WaterPumpOnCounter);
 		Blynk.virtualWrite(PumpRelayVirtual, 255);
-	#if DEBUG >= 1
-		BLYNK_ASSERT(timer.isEnabled(mainSoilMoistureTimer) == false);
-		BLYNK_ASSERT(timer.isEnabled(wateringSoilMoistureTimer) == true);
-		BLYNK_ASSERT(timer.isEnabled(mainWaterLevelTimer) == false);
-		BLYNK_ASSERT(timer.isEnabled(wateringWaterLevelTimer) == true);
-#endif
+		leds_watering();
+	
 		timer.disable(mainSoilMoistureTimer);
 		timer.enable(wateringSoilMoistureTimer);
 		timer.disable(mainWaterLevelTimer);
@@ -268,22 +296,23 @@ void CheckWaterLevel() {
 		WaterLevel = 2;
 	else
 		WaterLevel = 3;
+	if (!WaterLevel)
+		leds_nowater();
+	else
+		leds_waterOK();
+	BLYNK_LOG("Water level: %d\n", WaterLevel);
 	Blynk.virtualWrite(WaterLevelVirtual, WaterLevel);
 }
 
 void StopWatering() {
+	BLYNK_LOG("stopping watering\n");
 	digitalWrite(PumpRelay, LOW);
 	WaterPumpIsON = false;
 	WaterPumpOffCounter++;
+	BLYNK_LOG("--> WaterPumpOffCounter = %d\n", WaterPumpOffCounter);
 	Blynk.virtualWrite(PumpRelayVirtual, 0);
+	leds_notwatering();
 
-#if DEBUG >= 1
-	BLYNK_ASSERT(timer.isEnabled(mainSoilMoistureTimer) == true);
-	BLYNK_ASSERT(timer.isEnabled(wateringSoilMoistureTimer) == false);
-	BLYNK_ASSERT(timer.isEnabled(mainWaterLevelTimer) == true);
-	BLYNK_ASSERT(timer.isEnabled(wateringWaterLevelTimer) == false);
-
-#endif
 	timer.disable(wateringSoilMoistureTimer);
 	timer.enable(mainSoilMoistureTimer);
 	timer.disable(wateringWaterLevelTimer);
@@ -292,95 +321,73 @@ void StopWatering() {
 
 BLYNK_WRITE(Sensor0ThresholdVirtual) {
 	Sensor0Threshold = param.asInt();
-#if DEBUG >=1
-	Serial.print("Blynk writing Sensor0Threshold = ");
-	Serial.println(Sensor0Threshold);
-#endif
+	BLYNK_LOG("Blynk writing Sensor0Threshold = %d\n", Sensor0Threshold);
 }
 BLYNK_READ(Sensor0ThresholdVirtual) {
 	Blynk.virtualWrite(Sensor0ThresholdVirtual, Sensor0Threshold);
-#if DEBUG >=1
-	Serial.print("Blynk reading Sensor0Threshold = ");
-	Serial.println(Sensor0Threshold);
-#endif
+	BLYNK_LOG("Blynk reading Sensor0Threshold = %d\n",Sensor0Threshold);
 }
 
 BLYNK_WRITE(Sensor1ThresholdVirtual) {
 	Sensor1Threshold = param.asInt();
-#if DEBUG >=1
-	Serial.print("Blynk writing Sensor1Threshold = ");
-	Serial.println(Sensor1Threshold);
-#endif
+	BLYNK_LOG("Blynk writing Sensor1Threshold = %d\n",Sensor1Threshold);
 }
 BLYNK_READ(Sensor1ThresholdVirtual) {
 	Blynk.virtualWrite(Sensor1ThresholdVirtual, Sensor1Threshold);
-#if DEBUG >=1
-	Serial.print("Blynk reading Sensor1Threshold = ");
-	Serial.println(Sensor1Threshold);
-#endif
+	BLYNK_LOG("Blynk reading Sensor1Threshold = %d\n", Sensor1Threshold);
 }
 
 BLYNK_WRITE(Sensor2ThresholdVirtual) {
 	Sensor2Threshold = param.asInt();
-#if DEBUG >=1
-	Serial.print("Blynk writing Sensor2Threshold = ");
-	Serial.println(Sensor2Threshold);
-#endif
+	BLYNK_LOG("Blynk writing Sensor2Threshold = %d\n",Sensor2Threshold);
 }
 BLYNK_READ(Sensor2ThresholdVirtual) {
 	Blynk.virtualWrite(Sensor2ThresholdVirtual, Sensor2Threshold);
-#if DEBUG >=1
-	Serial.print("Blynk reading Sensor2Threshold = ");
-	Serial.println(Sensor2Threshold);
-#endif
+	BLYNK_LOG("Blynk reading Sensor2Threshold = %d\n",Sensor2Threshold);
 }
 
 BLYNK_WRITE(Sensor3ThresholdVirtual) {
 	Sensor3Threshold = param.asInt();
-#if DEBUG >=1
-	Serial.print("Blynk writing Sensor3Threshold = ");
-	Serial.println(Sensor3Threshold);
-#endif
+	BLYNK_LOG("Blynk writing Sensor3Threshold = %d\n",Sensor3Threshold);
 }
 BLYNK_READ(Sensor3ThresholdVirtual) {
 	Blynk.virtualWrite(Sensor3ThresholdVirtual, Sensor3Threshold);
-#if DEBUG >=1
-	Serial.print("Blynk reading Sensor3Threshold = ");
-	Serial.println(Sensor3Threshold);
-#endif
+	BLYNK_LOG("Blynk reading Sensor3Threshold = %d\n",Sensor3Threshold);
+}
+
+BLYNK_WRITE(SensorVeryDryVirtual) {
+	SensorVeryDry = param.asInt();
+	BLYNK_LOG("Blynk writing SensorVeryDry = %d\n", SensorVeryDry);
+}
+BLYNK_READ(SensorVeryDryVirtual) {
+	Blynk.virtualWrite(SensorVeryDryVirtual, SensorVeryDry);
+	BLYNK_LOG("Blynk reading SensorVeryDry = %d\n", SensorVeryDry);
 }
 
 
 BLYNK_READ(WaterLevelVirtual) {
 	Blynk.virtualWrite(WaterLevelVirtual, WaterLevel);
-#if DEBUG >=1
-	Serial.print("Blynk reading WaterLevel = ");
-	Serial.println(WaterLevel);
-#endif
+	BLYNK_LOG("Blynk reading WaterLevel = %d\n",WaterLevel);
 }
 
 BLYNK_WRITE(ResetCountersVirtual) {
 	WaterPumpOffCounter = WaterPumpOnCounter = 0;
-#if DEBUG >=1
-	Serial.print("Blynk resetting counters - param = ");
-	Serial.println(param.asInt());
-#endif
+	BLYNK_LOG("Blynk resetting counters - param = %d\n",param.asInt());
 }
 
-BLYNK_READ(WaterPumpStatusVirtual) {
-	Blynk.virtualWrite(WaterPumpStatusVirtual, WaterPumpIsON?1:0);
-#if DEBUG >=1
-	Serial.print("Blynk reading WaterPumpStatus = ");
-	Serial.println(Sensor3Threshold);
-#endif
+BLYNK_READ(WaterPumpOffCounterVirtual) {
+	Blynk.virtualWrite(WaterPumpOffCounterVirtual, WaterPumpOffCounter);
+	BLYNK_LOG("Blynk reading WaterPumpOffCounter = %d\n", WaterPumpOffCounterVirtual);
+}
+
+BLYNK_READ(WaterPumpOnCounterVirtual) {
+	Blynk.virtualWrite(WaterPumpOnCounterVirtual, WaterPumpOnCounter);
+	BLYNK_LOG("Blynk reading WaterPumpOnCounter = %d\n", WaterPumpOnCounterVirtual);
 }
 
 BLYNK_WRITE(SetMaxWaterIntervalVirtual) {
 	WATERING_MAX_INTERVAL = param.asLong()*1000L;
-#if DEBUG >=1
-	Serial.print("Blynk setting Watering Max Interval = ");
-	Serial.println(WATERING_MAX_INTERVAL);
-#endif
+	BLYNK_LOG("Blynk setting Watering Max Interval = %d\n",WATERING_MAX_INTERVAL);
 }
 
 BLYNK_WRITE(PumpRelayVirtual) {
@@ -396,4 +403,34 @@ BLYNK_WRITE(PumpRelayVirtual) {
 
 BLYNK_CONNECTED() {
 	Blynk.syncAll();
+}
+
+inline void leds_connecting() {
+	GreenLed.Blink(1000, 1000).Forever();
+}
+
+inline void leds_connected() {
+	GreenLed.Blink(300, 300).Repeat(6);
+}
+
+inline void leds_watering() {
+	GreenLed.On();
+}
+
+inline void leds_notwatering() {
+	GreenLed.Blink(1000,5000);
+}
+
+inline void leds_nowater() {
+	GreenLed.Stop();
+	RedLed.On();
+}
+
+inline void leds_waterOK() {
+	RedLed.Stop();
+	GreenLed.Blink(1000, 5000);
+}
+
+void heartbeatCallback() {
+	BLYNK_LOG("++++++++ Hearbeat = %u ++++++++\n", heartbeatCounter++);
 }
