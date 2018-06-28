@@ -1,7 +1,2 @@
 Move BlynkWrites away from soiluteMoisture function. Make these either periodic update from HW (through timer) or as BLYNK_READS (PULL from app)
-//Add watchdog timer (avh/wdt)
-//Added LEDs functions (cia Jled library)
-//add status message via console
-//added BLYNK LOG messages (to console)
-//added heartbeat to console
 figure out why it randomly resets

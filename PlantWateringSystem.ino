@@ -109,14 +109,15 @@ uint16_t heartbeatCounter;
 void setup()
 {
 	pinMode(MSensor0, INPUT);
-	pinMode(MSensor0Alarm, INPUT);
 	pinMode(MSensor1, INPUT);
-	pinMode(MSensor1Alarm, INPUT);
 	pinMode(MSensor2, INPUT);
-	pinMode(MSensor2Alarm, INPUT);
 	pinMode(MSensor3, INPUT);
+	/*	
+	pinMode(MSensor0Alarm, INPUT);
+	pinMode(MSensor1Alarm, INPUT);
+	pinMode(MSensor2Alarm, INPUT);
 	pinMode(MSensor3Alarm, INPUT);
-
+	*/
 	pinMode(PumpRelay, OUTPUT);
 
 	pinMode(WaterLevelEmpty, INPUT);
@@ -145,6 +146,7 @@ void setup()
 
 	//Blynk.begin(auth, wifi, ssid, pass);
 	do {
+		BLYNK_LOG("...................\n");
 		delay(1000);
 		BLYNK_LOG("Connecting to WiFi.\n");
 		Blynk.connectWiFi(ssid, pass);
@@ -155,6 +157,7 @@ void setup()
 			BLYNK_LOG("Failed to connect to Blynk server. Retrying...\n");
 	} while (Blynk.connected() == false);
 	BLYNK_LOG("Connected successfully to Blynk server.\n");
+	BLYNK_LOG("...................\n");
 
 	heartbeatCounter = 0;
 	heartbeatTimer = timer.setInterval(HEARTBEAT_INTERVAL, heartbeatCallback);								// set heartbeat timer to periodically print out  heartbeat counter to console
