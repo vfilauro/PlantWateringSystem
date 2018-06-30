@@ -60,14 +60,14 @@ byte WaterLevel;
 #define Sensor3ThresholdVirtual 23		// virtual pin to change threshold for this sensor
 #define SensorVeryDryVirtual	24		// virtual pin to change VERY_DRY threshold for ALL sensor
 
-#define DEFAULTSENSORTHRESHOLD	512		// the default moisture threshold value
-#define DEFAULTSENSORVERYDRY	1024	// the default moisture "very dry" threshold value
+#define DEFAULTSENSORTHRESHOLD	315		// the default moisture threshold value
+#define DEFAULTSENSORVERYDRY	850		// the default moisture "very dry" threshold value
 
 uint16_t Sensor0Threshold = DEFAULTSENSORTHRESHOLD;		// the default moisture threshold for this sensor
 uint16_t Sensor1Threshold = DEFAULTSENSORTHRESHOLD;		// the default moisture threshold for this sensor
 uint16_t Sensor2Threshold = DEFAULTSENSORTHRESHOLD;		// the default moisture threshold for this sensor
 uint16_t Sensor3Threshold = DEFAULTSENSORTHRESHOLD;		// the default moisture threshold for this sensor
-uint16_t SensorVeryDry = DEFAULTSENSORVERYDRY;		// the default moisture "very dry" threshold for all sensors
+uint16_t SensorVeryDry = DEFAULTSENSORVERYDRY;			// the default moisture "very dry" threshold for all sensors
 
 #define DEFAULT_WATERING_MAX_INTERVAL		300000L		// 5 minutes
 long WATERING_MAX_INTERVAL = DEFAULT_WATERING_MAX_INTERVAL;
@@ -187,12 +187,12 @@ void readSoilMoisture() {
 
 	//digitalWrite(SensorsPwr, HIGH);
 	//delay(1000);
-
+	/*
 	alarm[0] = digitalRead(MSensor0Alarm);
 	alarm[1] = digitalRead(MSensor1Alarm);
 	alarm[2] = digitalRead(MSensor2Alarm);
 	alarm[3] = digitalRead(MSensor3Alarm);
-
+	*/
 	for (int i = 0; i < NUM_SAMPLES; i++) {
 		delay(10);
 		moisture[0][i] = analogRead(MSensor0);
@@ -206,7 +206,7 @@ void readSoilMoisture() {
 	
 
 	//average all samples
-	float moisture_average[NUM_SAMPLES];
+	float moisture_average[NUM_SENSORS];
 
 	for (int i = 0; i< NUM_SENSORS; i++) {
 		moisture_average[i] = 0;
@@ -215,12 +215,12 @@ void readSoilMoisture() {
 		}
 		moisture_average[i] /= NUM_SAMPLES;
 	}
-
+	/*
 	Blynk.virtualWrite(MSensor0AlarmVirtual, alarm[0] ? 255 : 0);
 	Blynk.virtualWrite(MSensor1AlarmVirtual, alarm[1] ? 255 : 0);
 	Blynk.virtualWrite(MSensor2AlarmVirtual, alarm[2] ? 255 : 0);
 	Blynk.virtualWrite(MSensor3AlarmVirtual, alarm[3] ? 255 : 0);
-
+	*/
 	Blynk.virtualWrite(MSensor0Virtual, moisture_average[0]);
 	Blynk.virtualWrite(MSensor1Virtual, moisture_average[1]);
 	Blynk.virtualWrite(MSensor2Virtual, moisture_average[2]);
